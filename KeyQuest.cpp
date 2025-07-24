@@ -302,7 +302,8 @@ static constexpr int HASH_BATCH_SIZE   = 16;
 enum class SearchMode {
     Hybrid,
     Random,
-    Dance // A new mode that will be implemented
+    Dance,
+    Xor // A new mode that will be implemented
 };
 
 struct Config {
@@ -839,7 +840,7 @@ static void displaySummaryBox(std::ostream &os,
         tmp << COLOR_LABEL << "Target: "    << COLOR_VALUE << addr           << COLOR_RESET
             << COLOR_LABEL << "    Range: " << COLOR_VALUE << rng            << COLOR_RESET
             << COLOR_LABEL << "    Mode: "  << COLOR_VALUE
-            << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : "Dance"))
+            << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : (cfg.searchMode == SearchMode::Dance ? "Dance" : "Xor")))
             << COLOR_RESET
             << COLOR_LABEL << "    Threads: "<< COLOR_VALUE << numThreadsUsed << COLOR_RESET;
         auto content = padAnsi(tmp.str(), inner);
@@ -1132,12 +1133,14 @@ int main(int argc, char* argv[])
         std::getline(std::cin, cfg.range);
 
         // Search mode
-        std::cout << "Select search mode [1-Hybrid, 2-Random, 3-Dance, default=1]: ";
+        std::cout << "Select search mode [1-Hybrid, 2-Random, 3-Dance, 4-Xor, default=1]: ";
         std::string sm; std::getline(std::cin, sm);
         if (sm == "2") {
             cfg.searchMode = SearchMode::Random;
         } else if (sm == "3") {
             cfg.searchMode = SearchMode::Dance;
+        } else if (sm == "4") {
+            cfg.searchMode = SearchMode::Xor;
         } else {
             cfg.searchMode = SearchMode::Hybrid;
         }
@@ -1209,7 +1212,7 @@ int main(int argc, char* argv[])
               << "  Threads:      " << cfg.numThreads << "\n"
               << "  Address:      " << targetAddress << "\n"
               << "  Range:        " << cfg.range << "\n"
-              << "  Search Mode:  " << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : "Dance")) << "\n"
+              << "  Search Mode:  " << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : (cfg.searchMode == SearchMode::Dance ? "Dance" : "Xor"))) << "\n"
               << "  Suffix digits:" << cfg.randomHexCount << "\n\n"
               << "\033[2J\033[H";
 
@@ -1352,6 +1355,13 @@ int main(int argc, char* argv[])
                     } else {
                         // Backward step
                         absBN = bigNumSubtract(endBN, singleElementVector(step));
+                    }
+                } else if (cfg.searchMode == SearchMode::Xor) {
+                    // Xor mode: XORing the key with a mask
+                    uint64_t mask = g_prefixesTested.load();
+                    absBN = bigNumAdd(startBN, singleElementVector(mask));
+                    for (size_t i = 0; i < absBN.size(); ++i) {
+                        absBN[i] ^= mask;
                     }
                 } else { // Hybrid mode
                     // Hybrid: random suffix
