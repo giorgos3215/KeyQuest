@@ -303,7 +303,8 @@ enum class SearchMode {
     Hybrid,
     Random,
     Dance,
-    Xor // A new mode that will be implemented
+    Xor,
+    Follow // A new mode that will be implemented
 };
 
 struct Config {
@@ -840,7 +841,7 @@ static void displaySummaryBox(std::ostream &os,
         tmp << COLOR_LABEL << "Target: "    << COLOR_VALUE << addr           << COLOR_RESET
             << COLOR_LABEL << "    Range: " << COLOR_VALUE << rng            << COLOR_RESET
             << COLOR_LABEL << "    Mode: "  << COLOR_VALUE
-            << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : (cfg.searchMode == SearchMode::Dance ? "Dance" : "Xor")))
+            << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : (cfg.searchMode == SearchMode::Dance ? "Dance" : (cfg.searchMode == SearchMode::Xor ? "Xor" : "Follow"))))
             << COLOR_RESET
             << COLOR_LABEL << "    Threads: "<< COLOR_VALUE << numThreadsUsed << COLOR_RESET;
         auto content = padAnsi(tmp.str(), inner);
@@ -1133,7 +1134,7 @@ int main(int argc, char* argv[])
         std::getline(std::cin, cfg.range);
 
         // Search mode
-        std::cout << "Select search mode [1-Hybrid, 2-Random, 3-Dance, 4-Xor, default=1]: ";
+        std::cout << "Select search mode [1-Hybrid, 2-Random, 3-Dance, 4-Xor, 5-Follow, default=1]: ";
         std::string sm; std::getline(std::cin, sm);
         if (sm == "2") {
             cfg.searchMode = SearchMode::Random;
@@ -1141,6 +1142,8 @@ int main(int argc, char* argv[])
             cfg.searchMode = SearchMode::Dance;
         } else if (sm == "4") {
             cfg.searchMode = SearchMode::Xor;
+        } else if (sm == "5") {
+            cfg.searchMode = SearchMode::Follow;
         } else {
             cfg.searchMode = SearchMode::Hybrid;
         }
@@ -1212,7 +1215,7 @@ int main(int argc, char* argv[])
               << "  Threads:      " << cfg.numThreads << "\n"
               << "  Address:      " << targetAddress << "\n"
               << "  Range:        " << cfg.range << "\n"
-              << "  Search Mode:  " << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : (cfg.searchMode == SearchMode::Dance ? "Dance" : "Xor"))) << "\n"
+              << "  Search Mode:  " << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : (cfg.searchMode == SearchMode::Dance ? "Dance" : (cfg.searchMode == SearchMode::Xor ? "Xor" : "Follow")))) << "\n"
               << "  Suffix digits:" << cfg.randomHexCount << "\n\n"
               << "\033[2J\033[H";
 
@@ -1362,6 +1365,13 @@ int main(int argc, char* argv[])
                     absBN = bigNumAdd(startBN, singleElementVector(mask));
                     for (size_t i = 0; i < absBN.size(); ++i) {
                         absBN[i] ^= mask;
+                    }
+                } else if (cfg.searchMode == SearchMode::Follow) {
+                    // Follow mode: following the previous key
+                    if (g_prefixesTested.load() > 0) {
+                        absBN = bigNumAdd(absBN, singleElementVector(1));
+                    } else {
+                        absBN = startBN;
                     }
                 } else { // Hybrid mode
                     // Hybrid: random suffix
