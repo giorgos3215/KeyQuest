@@ -299,6 +299,12 @@ static std::string encodeAddress(const std::vector<uint8_t>& hash160) {
 static int g_pointsBatchSize = 512;
 static constexpr int HASH_BATCH_SIZE   = 16;
 
+enum class SearchMode {
+    Hybrid,
+    Random,
+    Dance // A new mode that will be implemented
+};
+
 struct Config {
     bool loaded        = false;
     bool encryption    = false;
@@ -306,6 +312,7 @@ struct Config {
     std::string address;
     std::string range;
     int randomHexCount = 0;
+    SearchMode searchMode = SearchMode::Hybrid; // Default search mode
 };
 
 static const char* kConfigFile = "config.txt";
@@ -734,6 +741,7 @@ static bool loadConfig(Config &cfg){
         else if(key=="address")   cfg.address=val;
         else if(key=="range")     cfg.range=val;
         else if(key=="randomHexCount") cfg.randomHexCount=std::stoi(val);
+        else if(key=="searchMode") cfg.searchMode = (SearchMode)std::stoi(val);
     }
     return true;
 }
@@ -746,6 +754,7 @@ static bool saveConfig(const Config &cfg){
     out<<"address="   <<cfg.address<<"\n";
     out<<"range="     <<cfg.range<<"\n";
     out<<"randomHexCount="<<cfg.randomHexCount<<"\n";
+    out<<"searchMode="<<(int)cfg.searchMode<<"\n";
     return true;
 }
 
@@ -794,6 +803,7 @@ static std::string padAnsi(std::string s,int width){
 }
 
 static void displaySummaryBox(std::ostream &os,
+                              const Config &cfg,
                               unsigned long long totalChecked,
                               double speed,
                               double elapsedTime,
@@ -829,7 +839,7 @@ static void displaySummaryBox(std::ostream &os,
         tmp << COLOR_LABEL << "Target: "    << COLOR_VALUE << addr           << COLOR_RESET
             << COLOR_LABEL << "    Range: " << COLOR_VALUE << rng            << COLOR_RESET
             << COLOR_LABEL << "    Mode: "  << COLOR_VALUE
-            << (g_fullRandomMode ? "Random" : "Hybrid")
+            << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : "Dance"))
             << COLOR_RESET
             << COLOR_LABEL << "    Threads: "<< COLOR_VALUE << numThreadsUsed << COLOR_RESET;
         auto content = padAnsi(tmp.str(), inner);
@@ -982,7 +992,8 @@ static void displayVictoryAnimation(const std::string &targetAddress){
     std::cout<<oss.str();
 }
 
-static void statsLoop(int totalThreads,
+static void statsLoop(const Config &cfg,
+                      int totalThreads,
                       const std::string &addr,
                       const std::string &rng,
                       long double totalRangeLD,
@@ -1004,7 +1015,7 @@ static void statsLoop(int totalThreads,
 
         std::ostringstream oss;
         oss<<"\033[H";
-        displaySummaryBox(oss, cc, speed, dt,
+        displaySummaryBox(oss, cfg, cc, speed, dt,
                           addr, rng, totalR,
                           (double)pct, totalThreads,
                           0ULL, totalCombosStr);
@@ -1120,20 +1131,30 @@ int main(int argc, char* argv[])
         std::cout << "Enter range hex <start:end>: ";
         std::getline(std::cin, cfg.range);
 
+        // Search mode
+        std::cout << "Select search mode [1-Hybrid, 2-Random, 3-Dance, default=1]: ";
+        std::string sm; std::getline(std::cin, sm);
+        if (sm == "2") {
+            cfg.searchMode = SearchMode::Random;
+        } else if (sm == "3") {
+            cfg.searchMode = SearchMode::Dance;
+        } else {
+            cfg.searchMode = SearchMode::Hybrid;
+        }
+
         // Random-suffix length
         auto posRange = cfg.range.find(':');
         int len0 = cfg.range.substr(0,posRange).size();
         int len1 = cfg.range.substr(posRange+1).size();
         int fullLen = std::max(len0,len1);
-        std::cout << "Enter random hex digits for suffix (0 = full random or >0 = Hybrid): ";
-        std::getline(std::cin, th);
-        if (!th.empty() && std::stoi(th) > 0) {
-            cfg.randomHexCount = std::stoi(th);
-            g_fullRandomMode   = false;
+        if (cfg.searchMode == SearchMode::Hybrid) {
+            std::cout << "Enter random hex digits for suffix (>0): ";
+            std::string th; std::getline(std::cin, th);
+            if (!th.empty() && std::stoi(th) > 0) {
+                cfg.randomHexCount = std::stoi(th);
+            }
         } else {
             cfg.randomHexCount = fullLen;
-            g_fullRandomMode   = true;
-            std::cout << "→ Full-random mode: random on " << fullLen << " hex.\n";
         }
 
         // Thread-progress display?
@@ -1188,6 +1209,7 @@ int main(int argc, char* argv[])
               << "  Threads:      " << cfg.numThreads << "\n"
               << "  Address:      " << targetAddress << "\n"
               << "  Range:        " << cfg.range << "\n"
+              << "  Search Mode:  " << (cfg.searchMode == SearchMode::Hybrid ? "Hybrid" : (cfg.searchMode == SearchMode::Random ? "Random" : "Dance")) << "\n"
               << "  Suffix digits:" << cfg.randomHexCount << "\n\n"
               << "\033[2J\033[H";
 
@@ -1245,7 +1267,7 @@ int main(int argc, char* argv[])
     auto mainStart = std::chrono::high_resolution_clock::now();
     g_stopStats.store(false);
     std::thread statsThread([&] {
-        statsLoop(numThreads, targetAddress, displayRange,
+        statsLoop(cfg, numThreads, targetAddress, displayRange,
                   totalRangeLD, 0.0L, mainStart,
                   g_threadRestarts, totalCombosLD, totalCombosStr);
     });
@@ -1253,7 +1275,7 @@ int main(int argc, char* argv[])
     Secp256K1 secp; secp.Init();
     int fullBatch = 2 * g_pointsBatchSize;
 
-#pragma omp parallel num_threads(numThreads) shared(thr,targetHash)
+#pragma omp parallel num_threads(numThreads) shared(cfg,thr,targetHash)
     {
         int tid = omp_get_thread_num();
         thread_local auto lastUpd = std::chrono::steady_clock::now();
@@ -1318,10 +1340,20 @@ int main(int argc, char* argv[])
                 // 1) Generate the absolute big-integer depending on mode
                 std::vector<uint64_t> absBN;
                 std::string suffix;
-                if (g_fullRandomMode) {
+                if (cfg.searchMode == SearchMode::Random) {
                     auto rndBN = bigNumRandom(sizeBN, totalBits);
                     absBN = bigNumAdd(startBN, rndBN);
-                } else {
+                } else if (cfg.searchMode == SearchMode::Dance) {
+                    // Dance mode: alternating forward and backward steps
+                    uint64_t step = g_prefixesTested.load() / 2;
+                    if (g_prefixesTested.load() % 2 == 0) {
+                        // Forward step
+                        absBN = bigNumAdd(startBN, singleElementVector(step));
+                    } else {
+                        // Backward step
+                        absBN = bigNumSubtract(endBN, singleElementVector(step));
+                    }
+                } else { // Hybrid mode
                     // Hybrid: random suffix
                     suffix = fastRandomHex(cfg.randomHexCount);
                     // Combine prefix+suffix into 64-hex string
