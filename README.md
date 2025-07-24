@@ -134,6 +134,7 @@ When a matching key is found:
 - **Dance search**: a new search mode that uses a pattern of alternating forward and backward steps through the key space.
 - **Xor search**: a new search mode that uses a pattern of XORing the key with a mask.
 - **Follow search**: a new search mode that uses a pattern of following the previous key.
+- **Spiral search**: a new search mode that starts from the beginning of the range and spirals inwards towards the center.
 - **Multi-threaded**: leverages OpenMP; configurable thread count with optional dynamic adjustment (`OMP_DYNAMIC`).
 - **Live statistics**: displays speed (Mkeys/s), progress percentage, total restarts, and per-thread status.
 - **Email alerts**: high-priority HTML notification on key discovery.
